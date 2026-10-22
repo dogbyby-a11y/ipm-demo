@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>박물관 IPM 모니터링 시스템 v8.4 (초고해상도 캡처 & 범례 분리형)</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <style>
+        body {
+            font-family: 'Malgun Gothic', sans-serif;
+            margin: 0; padding: 0;
+            background-color: #f4f6f9;
+            display: flex;
+            height: 100vh;
+            color: #333;
+            overflow: hidden;
+        }
+        /* 왼쪽 사이드바 */
+        .sidebar {
+            width: 300px;
+            background-color: #2c3e50;
+            color: white;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+            z-index: 110;
+            box-sizing: border-box;
+        }
+        .sidebar h3 {
+            margin-top: 0;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #4f5d73;
+            color: #ecf0f1;
+        }
+        .project-list {
+            flex: 1;
+            overflow-y: auto;
+            list-style: none;
+            padding: 0; margin: 0;
+        }
+        .project-item {
+            padding: 12px 15px;
+            background-color: #34495e;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .project-item.active { background-color: #1abc9c; }
+        .delete-btn {
+            background: none; border: none;
+            color: #e74c3c; cursor: pointer;
+            font-weight: bold; font-size: 16px;
+        }
+        .add-project-box {
+            margin-top: 15px;
+            padding-top: 10px;
+            border-top: 1px solid #4f5d73;
+        }
+        .input-text {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            border: none;
+            box-sizing: border-box;
+        }
+        .file-label {
+            display: block;
+            background-color: #34495e;
+            color: #bdc3c7;
+            padding: 8px;
+            margin-bottom: 6px;
+            border-radius: 4px;
+            text-align: center;
+            font-size: 11px;
+            cursor: pointer;
+            border: 1px dashed #7f8c8d;
+            text-overflow: ellipsis; white-space: nowrap; overflow: hidden;
+        }
+        .file-label.loaded { border: 1px solid #1abc9c; color: #1abc9c; font-weight: bold; }
+        
+        /* 오른쪽 메인 레이아웃 */
+        .main-layout {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            box-sizing: border-box;
+            padding: 20px;
+            gap: 15px;
+        }
+        .main-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            max-width: 1050px;
+        }
+        .main-header h2 { margin: 0; color: #2c3e50; font-size: 22px; }
+        .btn-capture {
+            background-color: #2980b9; color: white; border: none;
+            padding: 9px 18px; border-radius: 4px; cursor: pointer; font-weight: bold;
+            font-size: 13px; box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        }
+        .btn-capture:hover { background-color: #3498db; }
+
+        /* 🌟 [캡처 메인 컨테이너] 500(도면) + 140(범례패널) = 총 가로 640px로 확장 */
+        #capture-area {
+            width: 640px;
+            height: 500px;
+            position: relative;
+            border: 2px solid #bdc3c7;
+            border-radius: 6px;
+            background-color: #ffffff;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            display: flex;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        /* 순수 도면 줌/팬 뷰포트 영역 (정확히 500x500 분리 격리) */
+        #map-viewport {
+            width: 500px;
+            height: 500px;
+            position: relative;
+            overflow: hidden;
+            background-color: #d2d7d9;
+            cursor: grab;
+            flex-shrink: 0;
+            border-right: 1px solid #d5dbdb;
+        }
+        #map-viewport:active { cursor: grabbing; }
+
+        #layer-container {
+            width: 500px; height: 500px; position: absolute; top: 0; left: 0;
+            transform-origin: 0 0; will-change: transform;
+        }
+        #bg-image { width: 100%; height: 100%; object-fit: fill; display: none; pointer-events: none; }
+        
+        /* 🌟 [도면 우측 전용 범례 패널] 도면을 전혀 침범하지 않음 */
+        .right-legend-panel {
+            width: 140px;
+            height: 100%;
+            background-color: #fcfcfc;
+            padding: 15px 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            box-sizing: border-box;
+            border-left: 1px solid #e5e8e8;
+        }
+        .legend-title {
+            font-size: 12px;
+            font-weight: bold;
+            color: #2c3e50;
+            border-bottom: 2px solid #bdc3c7;
+            padding-bottom: 5px;
+            text-align: center;
+        }
+        .legend-box {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .legend-item { display: flex; align-items: center; gap: 6px; }
+        .legend-color { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.15); flex-shrink: 0; }
+        
+        .btn-reset {
+            background-color: #ecf0f1; border: 1px solid #bdc3c7; padding: 7px;
+            border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 11px;
+            text-align: center; color: #2c3e50; transition: background 0.2s;
+            margin-top: auto; /* 하단 배치 */
+        }
+        .btn-reset:hover { background-color: #d5dbdb; }
+
+        .trap-station { position: absolute; width: 1px; height: 1px; transform: translate(-50%, -50%); }
+        
+        /* 벡터 스팟 스타일 */
+        .pest-circle {
+            position: absolute; border: 1px solid rgba(255, 255, 255, 0.95); border-radius: 50%;
+            transform: translate(-50%, -50%); mix-blend-mode: multiply; cursor: pointer;
+            box-shadow: 0 0 3px rgba(0,0,0,0.2); transition: transform 0.15s; vector-effect: non-scaling-stroke;
+        }
+        
+        /* 툴팁 */
+        .tooltip {
+            visibility: hidden; position: absolute; background-color: rgba(32, 44, 57, 0.96);
+            color: white; padding: 10px; border-radius: 6px; font-size: 11px; z-index: 1000;
+            pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); line-height: 1.5;
+        }
+
+        /* 하단 상세 패널 */
+        .detail-panel {
+            max-width: 1050px;
+            background-color: white;
+            border: 1px solid #bdc3c7;
+            border-radius: 6px;
+            padding: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-height: 220px;
+            overflow-y: auto;
+        }
+        .panel-placeholder {
+            color: #7f8c8d; font-weight: bold; text-align: center; margin: auto; line-height: 1.5;
+        }
+        .panel-header-title {
+            font-size: 16px; font-weight: bold; color: #2c3e50;
+            border-bottom: 2px solid #1abc9c; padding-bottom: 5px; margin: 0;
+        }
+        .panel-content-wrapper { display: flex; gap: 20px; width: 100%; }
+        .panel-photos { width: 380px; display: flex; gap: 10px; flex-shrink: 0; }
+        .photo-frame {
+            flex: 1; background-color: #eaeded; border: 1px solid #d5dbdb;
+            border-radius: 4px; position: relative; height: 160px; overflow: hidden;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .photo-frame img { width: 100%; height: 100%; object-fit: contain; }
+        .photo-title {
+            position: absolute; bottom: 0; left: 0; right: 0; background-color: rgba(0,0,0,0.6);
+            color: white; font-size: 10px; text-align: center; padding: 3px 0; font-weight: bold;
+        }
+        .slide-btn {
+            position: absolute; top: 50%; transform: translateY(-50%);
+            background-color: rgba(0,0,0,0.5); color: white; border: none;
+            padding: 5px 8px; cursor: pointer; font-weight: bold; font-size: 12px; border-radius: 3px;
+        }
+        .slide-btn:hover { background-color: rgba(0,0,0,0.8); }
+        .slide-prev { left: 5px; } .slide-next { right: 5px; }
+
+        .panel-info-text { flex: 1; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+        .info-row { display: flex; border-bottom: 1px dashed #eaeded; padding-bottom: 4px; }
+        .info-label { width: 90px; font-weight: bold; color: #7f8c8d; flex-shrink: 0; }
+        .info-value { color: #2c3e50; line-height: 1.4; }
+        .pest-report-block {
+            background-color: #f8f9f9; border-left: 4px solid #3498db; padding: 8px 12px; margin-top: 4px; border-radius: 0 4px 4px 0;
+        }
+        .pest-report-block.danger { border-left-color: #e74c3c; background-color: #fdf2f2; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <h3>📂 IPM 프로젝트 목록</h3>
+        <ul class="project-list" id="project-list"></ul>
+        
+        <div class="add-project-box">
+            <h4>➕ 새 프로젝트 등록</h4>
+            <input type="text" id="new-proj-name" class="input-text" placeholder="예: 부산박물관 2차">
+            
+            <label for="img-uploader" id="lbl-img" class="file-label">🖼️ 1. 도면 이미지 선택</label>
+            <input type="file" id="img-uploader" accept="image/*" style="display: none;">
+            
+            <label for="data-uploader" id="lbl-data" class="file-label">📊 2. 모니터링 데이터 (앱시트)</label>
+            <input type="file" id="data-uploader" accept=".xlsx, .xls" style="display: none;">
+            
+            <label for="dict-uploader" id="lbl-dict" class="file-label">📚 3. 직접가해해충 도감 엑셀</label>
+            <input type="file" id="dict-uploader" accept=".xlsx, .xls" style="display: none;">
+            
+            <label for="folder-uploader" id="lbl-folder" class="file-label">📁 4. 사진 폴더 지정 (최상위)</label>
+            <input type="file" id="folder-uploader" webkitdirectory directory multiple style="display: none;">
+            
+            <button class="btn-capture" style="background-color: #1abc9c; width: 100%; margin-top: 5px;" id="add-btn">프로젝트 마스터 생성</button>
+        </div>
+    </div>
+
+    <div class="main-layout">
+        <div class="main-header">
+            <h2 id="current-view-title">프로젝트를 선택하거나 새 셋트를 등록하세요</h2>
+            <button class="btn-capture" id="download-btn">📸 고해상도 도면 캡처 (보고서용)</button>
+        </div>
+
+        <!-- 🌟 전체 캡처 대상 컨테이너 (도면 500px + 범례 140px = 총 640px) -->
+        <div id="capture-area">
+            <div id="no-data" style="position:absolute; top:50%; left:250px; transform:translate(-50%,-50%); color:#7f8c8d; font-weight:bold; text-align:center; z-index:10;">프로젝트를 로드해 주세요.</div>
+            
+            <!-- 순수 도면 줌/팬 전용 500x500 뷰포트 -->
+            <div id="map-viewport">
+                <div id="layer-container">
+                    <img id="bg-image" alt="도면 배경">
+                </div>
+            </div>
+
+            <!-- 우측 범례 패널 (도면과 완전 분리되어 도면을 가리지 않음) -->
+            <div class="right-legend-panel" id="ui-overlay" style="display: none;">
+                <div class="legend-title">범 례 (Legend)</div>
+                <div class="legend-box">
+                    <div class="legend-item"><div class="legend-color" style="background-color: #e74c3c;"></div><span>직접가해해충</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background-color: #e67e22;"></div><span>간접가해해충</span></div>
+                    <div class="legend-item"><div class="legend-color" style="background-color: #3498db;"></div><span>위생해충</span></div>
+                </div>
+                <button class="btn-reset" id="reset-btn">🔄 뷰 배율 초기화</button>
+            </div>
+        </div>
+
+        <!-- 하단 상세 패널 -->
+        <div class="detail-panel" id="detail-panel">
+            <div class="panel-placeholder" id="panel-placeholder">
+                📍 도면 위의 해충 원(스팟) 데이터를 클릭하시면<br>여기에 해당 트랩의 전경 사진, 포획 해충 세부 접사 및 보존과학 방제 가이드가 연동됩니다.
+            </div>
+        </div>
+    </div>
+
+    <div id="tooltip" class="tooltip"></div>
+
+    <script>
+        const projectListEl = document.getElementById('project-list');
+        const imgUploader = document.getElementById('img-uploader');
+        const dataUploader = document.getElementById('data-uploader');
+        const dictUploader = document.getElementById('dict-uploader');
+        const folderUploader = document.getElementById('folder-uploader');
+        
+        const lblImg = document.getElementById('lbl-img');
+        const lblData = document.getElementById('lbl-data');
+        const lblDict = document.getElementById('lbl-dict');
+        const lblFolder = document.getElementById('lbl-folder');
+        const addBtn = document.getElementById('add-btn');
+        
+        const currentViewTitle = document.getElementById('current-view-title');
+        const captureArea = document.getElementById('capture-area');
+        const mapViewport = document.getElementById('map-viewport');
+        const layerContainer = document.getElementById('layer-container');
+        const bgImage = document.getElementById('bg-image');
+        const noDataMsg = document.getElementById('no-data');
+        const uiOverlay = document.getElementById('ui-overlay');
+        const resetBtn = document.getElementById('reset-btn');
+        const detailPanel = document.getElementById('detail-panel');
+        const panelPlaceholder = document.getElementById('panel-placeholder');
+        const tooltip = document.getElementById('tooltip');
+        const downloadBtn = document.getElementById('download-btn');
+
+        let dbInstance = null;
+        let tempImgBase64 = "";
+        let tempMainExcelJson = null;
+        let tempDictExcelJson = {};
+        let tempPhotosMap = {};
+
+        let scale = 1; let pointX = 0; let pointY = 0;
+        let startX = 0; let startY = 0; let isDragging = false;
+
+        let currentSlideIdx = 0;
+        let currentSlideImgList = [];
+
+        const dbRequest = indexedDB.open("IPM_Master_DB_v8", 1);
+        dbRequest.onupgradeneeded = function(e) {
+            let db = e.target.result;
+            if (!db.objectStoreNames.contains("projects")) {
+                db.createObjectStore("projects", { keyPath: "name" });
+            }
+        };
+        dbRequest.onsuccess = function(e) {
+            dbInstance = e.target.result;
+            loadProjectsFromDB();
+        };
+
+        imgUploader.addEventListener('change', (e) => {
+            const file = e.target.files[0]; if(!file) return;
+            lblImg.textContent = `🖼️ ${file.name}`; lblImg.classList.add('loaded');
+            const r = new FileReader(); r.onload = (ev) => { tempImgBase64 = ev.target.result; }; r.readAsDataURL(file);
+        });
+
+        dataUploader.addEventListener('change', (e) => {
+            const file = e.target.files[0]; if(!file) return;
+            lblData.textContent = `📊 ${file.name}`; lblData.classList.add('loaded');
+            const r = new FileReader(); r.onload = (ev) => {
+                const wb = XLSX.read(new Uint8Array(ev.target.result), {type: 'array'});
+                const sheet = wb.Sheets[wb.SheetNames[1] || wb.SheetNames[0]];
+                tempMainExcelJson = XLSX.utils.sheet_to_json(sheet);
+            }; r.readAsArrayBuffer(file);
+        });
+
+        dictUploader.addEventListener('change', (e) => {
+            const file = e.target.files[0]; if(!file) return;
+            lblDict.textContent = `📚 ${file.name}`; lblDict.classList.add('loaded');
+            const r = new FileReader(); r.onload = (ev) => {
+                const wb = XLSX.read(new Uint8Array(ev.target.result), {type: 'array'});
+                const sheet = wb.Sheets[wb.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(sheet);
+                tempDictExcelJson = {};
+                rows.forEach(row => {
+                    if(row['국명']) {
+                        tempDictExcelJson[row['국명'].trim()] = {
+                            target: row['가해 유물(재질)'] || '',
+                            guide: row['권장 방제'] || ''
+                        };
+                    }
+                });
+            }; r.readAsArrayBuffer(file);
+        });
+
+        folderUploader.addEventListener('change', (e) => {
+            const files = e.target.files; if(files.length === 0) return;
+            lblFolder.textContent = `📁 사진 데이터 ${files.length}개 인식 완료`; lblFolder.classList.add('loaded');
+            tempPhotosMap = {};
+            let loadedCount = 0;
+            for(let i=0; i<files.length; i++) {
+                const file = files[i];
+                const path = file.webkitRelativePath;
+                const reader = new FileReader();
+                reader.onload = (function(currentPath) {
+                    return function(ev) {
+                        tempPhotosMap[currentPath] = ev.target.result;
+                        loadedCount++;
+                    };
+                })(path);
+                reader.readAsDataURL(file);
+            }
+        });
+
+        addBtn.addEventListener('click', () => {
+            const name = document.getElementById('new-proj-name').value.trim();
+            if(!name) return alert("프로젝트 이름을 명시하세요.");
+            if(!tempImgBase64) return alert("도면 이미지가 누락되었습니다.");
+            if(!tempMainExcelJson) return alert("앱시트 모니터링 데이터가 누락되었습니다.");
+            
+            const trapGroups = {};
+            tempMainExcelJson.forEach(row => {
+                const trapId = row['트랩번호'];
+                const x = parseFloat(row['X좌표']);
+                const y = parseFloat(row['Y좌표']);
+                const type = row['유해생물 유형'];
+                const pName = row['국명'] ? row['국명'].trim() : '';
+                const count = parseInt(row['개체수']) || 0;
+
+                if (!trapId || isNaN(x) || isNaN(y)) return;
+
+                let locData = '미지정 구역';
+                if (row['장소2'] || row['장소3']) {
+                    const block2 = row['장소2'] ? String(row['장소2']).trim() : '';
+                    const block3 = row['장소3'] ? String(row['장소3']).trim() : '';
+                    locData = `${block2} ${block3}`.trim();
+                } else if (row['조사구역'] || row['장소']) {
+                    locData = row['조사구역'] || row['장소'];
+                }
+
+                if (!trapGroups[trapId]) {
+                    trapGroups[trapId] = {
+                        x: x, y: y,
+                        location: locData,
+                        chasaText: row['모니터링 차수'] || '-',
+                        startDate: row['시작일자'] || '-',
+                        endDate: row['종료일자'] || '-',
+                        details: { '직접가해해충': {}, '간접가해해충': {}, '위생해충': {} },
+                        totals: { '직접가해해충': 0, '간접가해해충': 0, '위생해충': 0 },
+                        taxonomy: {}
+                    };
+                }
+
+                if (pName) {
+                    trapGroups[trapId].taxonomy[pName] = {
+                        type: type || '미분류',
+                        sciname: row['학명'] || '-',
+                        class: row['강'] || '-',
+                        order: row['목'] || '-',
+                        family: row['과'] || '-'
+                    };
+
+                    if (type && trapGroups[trapId].details[type]) {
+                        if (!trapGroups[trapId].details[type][pName]) trapGroups[trapId].details[type][pName] = 0;
+                        trapGroups[trapId].details[type][pName] += count;
+                        trapGroups[trapId].totals[type] += count;
+                    }
+                }
+            });
+
+            const tx = dbInstance.transaction("projects", "readwrite");
+            const store = tx.objectStore("projects");
+            store.put({
+                name: name,
+                image: tempImgBase64,
+                spots: trapGroups,
+                dict: tempDictExcelJson,
+                photos: tempPhotosMap
+            });
+
+            tx.oncomplete = function() {
+                alert(`[${name}] 프로젝트 대시보드가 성공적으로 마스터 DB에 빌드되었습니다!`);
+                document.getElementById('new-proj-name').value = '';
+                lblImg.textContent = "🖼️ 1. 도면 이미지 선택"; lblImg.classList.remove('loaded');
+                lblData.textContent = "📊 2. 모니터링 데이터 (앱시트)"; lblData.classList.remove('loaded');
+                lblDict.textContent = "📚 3. 직접가해해충 도감 엑셀"; lblDict.classList.remove('loaded');
+                lblFolder.textContent = "📁 4. 사진 폴더 지정 (최상위)"; lblFolder.classList.remove('loaded');
+                tempImgBase64 = ""; tempMainExcelJson = null; tempDictExcelJson = {}; tempPhotosMap = {};
+                loadProjectsFromDB();
+            };
+        });
+
+        function loadProjectsFromDB() {
+            const tx = dbInstance.transaction("projects", "readonly");
+            const store = tx.objectStore("projects");
+            const req = store.getAllKeys();
+            req.onsuccess = function() {
+                projectListEl.innerHTML = '';
+                req.result.forEach(pName => {
+                    const li = document.createElement('li');
+                    li.className = 'project-item';
+                    li.innerHTML = `<span>📝 ${pName}</span><button class="delete-btn" onclick="deleteProject(event, '${pName}')">×</button>`;
+                    li.addEventListener('click', () => selectProject(pName));
+                    projectListEl.appendChild(li);
+                });
+            };
+        }
+
+        function updateTransform() {
+            layerContainer.style.transform = `translate(${pointX}px, ${pointY}px) scale(${scale})`;
+        }
+        function resetView() { scale = 1; pointX = 0; pointY = 0; updateTransform(); }
+
+        function selectProject(pName) {
+            resetView();
+            detailPanel.innerHTML = '<div class="panel-placeholder">📍 원 데이터를 클릭하시면 하단 상세 리포트가 연동됩니다.</div>';
+            
+            const items = document.querySelectorAll('.project-item');
+            items.forEach(item => {
+                if(item.textContent.includes(pName)) item.classList.add('active');
+                else item.classList.remove('active');
+            });
+
+            const tx = dbInstance.transaction("projects", "readonly");
+            const store = tx.objectStore("projects");
+            const req = store.get(pName);
+
+            req.onsuccess = function() {
+                const project = req.result; if(!project) return;
+                currentViewTitle.textContent = project.name;
+                noDataMsg.style.display = 'none'; uiOverlay.style.display = 'flex';
+                bgImage.src = project.image; bgImage.style.display = 'block';
+
+                const existingStations = layerContainer.querySelectorAll('.trap-station');
+                existingStations.forEach(st => st.remove());
+
+                Object.keys(project.spots).forEach(trapId => {
+                    const group = project.spots[trapId];
+                    const station = document.createElement('div');
+                    station.className = 'trap-station';
+                    station.style.left = group.x + 'px';
+                    station.style.top = group.y + 'px';
+
+                    let tooltipContent = `<strong>📍 트랩 번호: ${trapId}</strong>\n`;
+                    const order = ['직접가해해충', '간접가해해충', '위생해충'];
+                    order.forEach(type => {
+                        const pests = group.details[type];
+                        const pKeys = Object.keys(pests);
+                        if(pKeys.length > 0) {
+                            tooltipContent += `• ${type} : ${pKeys.map(k=>`${k}(${pests[k]})`).join(', ')}\n`;
+                        }
+                    });
+
+                    const styleConfig = {
+                        '직접가해해충': { color: 'rgba(231, 76, 60, 0.75)', z: 3 },
+                        '간접가해해충': { color: 'rgba(230, 126, 34, 0.75)', z: 2 },
+                        '위생해충': { color: 'rgba(52, 152, 219, 0.75)', z: 1 }
+                    };
+
+                    order.forEach(type => {
+                        const totalCount = group.totals[type];
+                        if (totalCount > 0) {
+                            const circle = document.createElement('div');
+                            circle.className = 'pest-circle';
+                            
+                            let size = 12;
+                            if (totalCount === 2) size = 16;
+                            else if (totalCount === 3) size = 20;
+                            else if (totalCount === 4) size = 24;
+                            else if (totalCount >= 5) size = 28;
+                            
+                            circle.style.width = size + 'px'; circle.style.height = size + 'px';
+                            circle.style.backgroundColor = styleConfig[type].color;
+                            circle.style.zIndex = styleConfig[type].z;
+
+                            circle.addEventListener('mouseenter', () => {
+                                tooltip.style.visibility = 'visible'; tooltip.innerHTML = tooltipContent.replace(/\n/g, '<br>');
+                                const rect = mapViewport.getBoundingClientRect();
+                                tooltip.style.left = (rect.left + pointX + (group.x * scale) + 15) + 'px';
+                                tooltip.style.top = (rect.top + pointY + (group.y * scale) - 15) + 'px';
+                            });
+                            circle.addEventListener('mouseleave', () => { tooltip.style.visibility = 'hidden'; });
+
+                            circle.addEventListener('click', (e) => {
+                                e.stopPropagation();
+                                buildDetailPanel(trapId, group, project.dict, project.photos);
+                            });
+
+                            station.appendChild(circle);
+                        }
+                    });
+                    layerContainer.appendChild(station);
+                });
+            };
+        }
+
+        function formatExcelDate(dateVal) {
+            if (!dateVal || dateVal === '-') return '-';
+            if (!isNaN(dateVal)) {
+                const date = new Date((dateVal - 25569) * 86400 * 1000);
+                return date.toISOString().split('T')[0];
+            }
+            return dateVal;
+        }
+
+        function buildDetailPanel(trapId, group, dict, photosPool) {
+            let totalPhotoSrc = "";
+            Object.keys(photosPool).forEach(p => {
+                if(p.includes("전체사진/") && p.toLowerCase().includes(`${trapId.toLowerCase()}.jpg`)) {
+                    totalPhotoSrc = photosPool[p];
+                }
+            });
+
+            let html = `
+                <h4 class="panel-header-title">🔍 [${trapId}번 트랩] 실시간 분석 모니터링 리포트</h4>
+                <div class="panel-content-wrapper">
+                    <div class="panel-photos">
+                        <div class="photo-frame">
+                            ${totalPhotoSrc ? `<img src="${totalPhotoSrc}">` : `<div style="color:#95a5a6; font-size:11px;">⚠️ 전체 전경 사진 없음</div>`}
+                            <div class="photo-title">📷 트랩 설치 전경</div>
+                        </div>
+                        <div class="photo-frame" id="slide-frame-container">
+                            <div class="photo-title">🔬 해충 실물 접사 사진</div>
+                        </div>
+                    </div>
+                    <div class="panel-info-text">
+                        <div class="info-row"><div class="info-label">🏢 조사구역</div><div class="info-value">${group.location}</div></div>
+                        <div class="info-row"><div class="info-label">📅 조사차수</div><div class="info-value">${group.chasaText}</div></div>
+                        <div class="info-row"><div class="info-label">⏱️ 조사기간</div><div class="info-value">${formatExcelDate(group.startDate)} ~ ${formatExcelDate(group.endDate)}</div></div>
+            `;
+
+            currentSlideImgList = [];
+            const order = ['직접가해해충', '간접가해해충', '위생해충'];
+            
+            order.forEach(type => {
+                const pests = group.details[type];
+                Object.keys(pests).forEach(pName => {
+                    const count = pests[pName];
+                    const tax = group.taxonomy[pName] || {};
+                    const isDirect = (type === '직접가해해충');
+
+                    Object.keys(photosPool).forEach(p => {
+                        if(p.includes("세부사진/") && p.includes(`/${trapId}/`) && p.includes(pName)) {
+                            currentSlideImgList.push({ name: pName, src: photosPool[p] });
+                        }
+                    });
+
+                    let targetText = "※ 유물 직접 가해 없음";
+                    let guideText = "서식처 차단을 위한 정기적인 청소 및 환경 모니터링 관리를 권장합니다.";
+
+                    if (isDirect) {
+                        if (dict && dict[pName]) {
+                            targetText = dict[pName].target || '가해 성분 검출 분석 중';
+                            guideText = dict[pName].guide || '보존과학 방제 가이드 분석 중';
+                        } else {
+                            targetText = "⚠️ 가해 재질 가이드 업데이트 예정 (추후 보완 예정)";
+                            guideText = "⚠️ 권장방제 지침 업데이트 예정 (직접가해해충 분류 동정 분석 후 보완)";
+                        }
+                    }
+
+                    html += `
+                        <div class="pest-report-block ${isDirect ? 'danger' : ''}">
+                            <strong style="color:${isDirect ? '#c0392b':'#2c3e50'}; font-size:14px;">
+                                ${isDirect ? '🟥':'🟦'} ${pName} (${count}마리 포획)
+                            </strong>
+                            <div style="font-size:11px; color:#7f8c8d; margin-top:2px;">
+                                분류체계: ${tax.class || '-'} > ${tax.order || '-'} > ${tax.family || '-'} | 학명: <i>${tax.sciname || '-'}</i>
+                            </div>
+                            <div style="margin-top:5px; font-size:12px;">
+                                <span style="font-weight:bold; color:#34495e;">• 가해 대상 유물 :</span> ${targetText}
+                            </div>
+                            <div style="margin-top:2px; font-size:12px;">
+                                <span style="font-weight:bold; color:#34495e;">• 권장 방제 가이드 :</span> <span style="color:${isDirect ? '#b7950b':'#2c3e50'};">${guideText}</span>
+                            </div>
+                        </div>
+                    `;
+                });
+            });
+
+            html += `</div></div>`;
+            detailPanel.innerHTML = html;
+
+            const slideContainer = document.getElementById('slide-frame-container');
+            currentSlideIdx = 0;
+            renderSlidePhoto(slideContainer);
+        }
+
+        function renderSlidePhoto(container) {
+            const oldImg = container.querySelector('img'); if(oldImg) oldImg.remove();
+            const oldBtns = container.querySelectorAll('.slide-btn'); oldBtns.forEach(b=>b.remove());
+            const oldAlert = container.querySelector('.no-img-text'); if(oldAlert) oldAlert.remove();
+
+            if(currentSlideImgList.length === 0) {
+                const alertDiv = document.createElement('div');
+                alertDiv.className = 'no-img-text';
+                alertDiv.style.cssText = "color:#95a5a6; font-size:11px; text-align:center; padding:10px;";
+                alertDiv.textContent = "🔍 매칭 세부 사진 없음";
+                container.insertBefore(alertDiv, container.firstChild);
+                return;
+            }
+
+            const item = currentSlideImgList[currentSlideIdx];
+            const imgEl = document.createElement('img');
+            imgEl.src = item.src;
+            container.insertBefore(imgEl, container.firstChild);
+
+            if(currentSlideImgList.length > 1) {
+                const prevBtn = document.createElement('button');
+                prevBtn.className = 'slide-btn slide-prev'; prevBtn.innerHTML = '◀';
+                prevBtn.onclick = () => {
+                    currentSlideIdx = (currentSlideIdx === 0) ? currentSlideImgList.length - 1 : currentSlideIdx - 1;
+                    renderSlidePhoto(container);
+                };
+
+                const nextBtn = document.createElement('button');
+                nextBtn.className = 'slide-btn slide-next'; nextBtn.innerHTML = '▶';
+                nextBtn.onclick = () => {
+                    currentSlideIdx = (currentSlideIdx === currentSlideImgList.length - 1) ? 0 : currentSlideIdx + 1;
+                    renderSlidePhoto(container);
+                };
+
+                const titleOverlay = container.querySelector('.photo-title');
+                titleOverlay.textContent = `🔬 세부: ${item.name} (${currentSlideIdx + 1}/${currentSlideImgList.length})`;
+                container.appendChild(prevBtn);
+                container.appendChild(nextBtn);
+            } else {
+                const titleOverlay = container.querySelector('.photo-title');
+                titleOverlay.textContent = `🔬 세부접사: ${item.name}`;
+            }
+        }
+
+        // 줌 및 드래그 제어 (mapViewport 영역에서만 반응)
+        mapViewport.addEventListener('mousedown', (e) => {
+            e.preventDefault(); isDragging = true;
+            startX = e.clientX - pointX; startY = e.clientY - pointY;
+        });
+        window.addEventListener('mouseup', () => { isDragging = false; });
+        mapViewport.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            pointX = e.clientX - startX; pointY = e.clientY - startY; updateTransform();
+        });
+        mapViewport.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const xs = (e.clientX - mapViewport.getBoundingClientRect().left - pointX) / scale;
+            const ys = (e.clientY - mapViewport.getBoundingClientRect().top - pointY) / scale;
+            if (-e.deltaY > 0) { if (scale < 8) scale *= 1.12; } else { if (scale > 0.8) scale /= 1.12; }
+            pointX = e.clientX - mapViewport.getBoundingClientRect().left - xs * scale;
+            pointY = e.clientY - mapViewport.getBoundingClientRect().top - ys * scale;
+            updateTransform();
+        });
+        resetBtn.addEventListener('click', (e) => { e.stopPropagation(); resetView(); });
+
+        function deleteProject(event, pName) {
+            event.stopPropagation();
+            if (confirm(`[${pName}] 프로젝트를 삭제하시겠습니까?`)) {
+                const tx = dbInstance.transaction("projects", "readwrite");
+                const store = tx.objectStore("projects");
+                store.delete(pName);
+                tx.oncomplete = function() { loadProjectsFromDB(); window.location.reload(); };
+            }
+        }
+
+        // 🌟 [핵심 변경: 초고해상도 300DPI급 리포트 캡처 엔진]
+        downloadBtn.addEventListener('click', function() {
+            downloadBtn.textContent = "⏳ 초고해상도 렌더링 중...";
+            
+            // scale: 3 설정으로 원본의 3배(약 1920x1500px, 300DPI급 인쇄 화질)로 생성
+            html2canvas(captureArea, {
+                useCORS: true,
+                scale: 3, // 초고화질 배율
+                backgroundColor: "#ffffff",
+                logging: false
+            }).then(canvas => {
+                const link = document.createElement('a');
+                link.download = `${currentViewTitle.textContent}_IPM시각화_보고서용.png`;
+                link.href = canvas.toDataURL("image/png", 1.0);
+                link.click();
+                downloadBtn.textContent = "📸 고해상도 도면 캡처 (보고서용)";
+            }).catch(err => {
+                alert("캡처 중 오류가 발생했습니다.");
+                downloadBtn.textContent = "📸 고해상도 도면 캡처 (보고서용)";
+            });
+        });
+    </script>
+</body>
+</html>
