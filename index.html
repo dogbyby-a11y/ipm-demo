@@ -111,12 +111,6 @@
             position: absolute; bottom: 0; left: 0; right: 0; background-color: rgba(0,0,0,0.6);
             color: white; font-size: 10px; text-align: center; padding: 3px 0; font-weight: bold;
         }
-        .slide-btn {
-            position: absolute; top: 50%; transform: translateY(-50%);
-            background-color: rgba(0,0,0,0.5); color: white; border: none;
-            padding: 5px 8px; cursor: pointer; font-weight: bold; font-size: 12px; border-radius: 3px;
-        }
-        .slide-prev { left: 5px; } .slide-next { right: 5px; }
 
         .panel-info-text { flex: 1; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
         .info-row { display: flex; border-bottom: 1px dashed #eaeded; padding-bottom: 4px; }
@@ -174,7 +168,7 @@
     <div id="tooltip" class="tooltip"></div>
 
     <script>
-        const ACCESS_PASSWORD = "1234";
+        const ACCESS_PASSWORD = "0558";
         const authOverlay = document.getElementById('auth-overlay');
         const passInput = document.getElementById('access-password-input');
         const submitBtn = document.getElementById('auth-submit-btn');
@@ -183,7 +177,7 @@
         function checkAuth() {
             if (passInput.value === ACCESS_PASSWORD) {
                 authOverlay.style.display = 'none';
-                initAutoLoad(); // 비밀번호 통과 시 자동 다운로드 실행
+                initAutoLoad();
             } else {
                 errorMsg.style.display = 'block';
                 passInput.value = '';
@@ -201,43 +195,52 @@
         const uiOverlay = document.getElementById('ui-overlay');
         const resetBtn = document.getElementById('reset-btn');
         const detailPanel = document.getElementById('detail-panel');
-        const tooltip = document.getElementById('tooltip');
         const downloadBtn = document.getElementById('download-btn');
 
         let scale = 1; let pointX = 0; let pointY = 0;
         let startX = 0; let startY = 0; let isDragging = false;
         let globalProjectData = null;
 
-        // 🌟 [핵심] 깃허브에 올라간 파일을 자동으로 읽어오는 통신 함수
+        // 🌟 저장소에 실제로 올라간 한글 파일명을 그대로 가리키도록 연결
         async function initAutoLoad() {
             try {
                 currentViewTitle.textContent = "⏳ 모니터링 데이터 분석 중...";
                 
-                // 1. 도면 이미지 로드
-                bgImage.src = 'map.png';
+                // 1. 도면 이미지 로드 (URL 인코딩 적용)
+                const mapFileName = encodeURIComponent('ㅇㅇ박물관 지하1층 기본도면.jpg');
+                bgImage.src = mapFileName;
                 bgImage.onload = () => {
                     bgImage.style.display = 'block';
                     noDataMsg.style.display = 'none';
                     uiOverlay.style.display = 'flex';
                 };
 
-                // 2. 도감 엑셀 자동 다운로드 및 파싱
-                const dictRes = await fetch('직접가해해충_도감.xlsx');
-                const dictBuffer = await dictRes.arrayBuffer();
-                const dictWb = XLSX.read(new Uint8Array(dictBuffer), {type: 'array'});
-                const dictRows = XLSX.utils.sheet_to_json(dictWb.Sheets[dictWb.SheetNames[0]]);
-                const dictMap = {};
-                dictRows.forEach(r => {
-                    if (r['국명']) {
-                        dictMap[String(r['국명']).trim()] = {
-                            target: r['가해 유물(재질)'] || '',
-                            guide: r['권장 방제'] || ''
-                        };
+                // 2. 도감 엑셀 로드 (파일이 없을 경우에도 건너뛰도록 처리)
+                let dictMap = {};
+                try {
+                    const dictRes = await fetch(encodeURIComponent('직접가해해충_도감.xlsx'));
+                    if (dictRes.ok) {
+                        const dictBuffer = await dictRes.arrayBuffer();
+                        const dictWb = XLSX.read(new Uint8Array(dictBuffer), {type: 'array'});
+                        const dictRows = XLSX.utils.sheet_to_json(dictWb.Sheets[dictWb.SheetNames[0]]);
+                        dictRows.forEach(r => {
+                            if (r['국명']) {
+                                dictMap[String(r['국명']).trim()] = {
+                                    target: r['가해 유물(재질)'] || '',
+                                    guide: r['권장 방제'] || ''
+                                };
+                            }
+                        });
                     }
-                });
+                } catch(e) {
+                    console.warn("도감 파일 누락 - 기본 텍스트 모드로 작동합니다.");
+                }
 
-                // 3. 모니터링 엑셀 자동 다운로드 및 파싱
-                const dataRes = await fetch('data.xlsx');
+                // 3. 모니터링 엑셀 다운로드 및 분석
+                const dataFileName = encodeURIComponent('2026 ㅇㅇ박물관 1차 모니터링.xlsx');
+                const dataRes = await fetch(dataFileName);
+                if (!dataRes.ok) throw new Error("모니터링 엑셀 파일을 읽을 수 없습니다.");
+                
                 const dataBuffer = await dataRes.arrayBuffer();
                 const dataWb = XLSX.read(new Uint8Array(dataBuffer), {type: 'array'});
                 const dataRows = XLSX.utils.sheet_to_json(dataWb.Sheets[dataWb.SheetNames[1] || dataWb.SheetNames[0]]);
@@ -298,7 +301,7 @@
 
             } catch (err) {
                 console.error(err);
-                alert("저장소에서 map.png, data.xlsx, 직접가해해충_도감.xlsx 파일을 찾을 수 없습니다. 깃허브에 파일이 올라가 있는지 확인해 주세요.");
+                alert("데이터 로드 중 오류가 발생했습니다. 브라우저 개발자 도구(F12) 콘솔을 확인해 주세요.");
             }
         }
 
@@ -313,16 +316,7 @@
                 station.style.left = group.x + 'px';
                 station.style.top = group.y + 'px';
 
-                let tooltipContent = `<strong>📍 트랩 번호: ${trapId}</strong>\n`;
                 const order = ['직접가해해충', '간접가해해충', '위생해충'];
-                order.forEach(type => {
-                    const pests = group.details[type];
-                    const pKeys = Object.keys(pests);
-                    if(pKeys.length > 0) {
-                        tooltipContent += `• ${type} : ${pKeys.map(k=>`${k}(${pests[k]})`).join(', ')}\n`;
-                    }
-                });
-
                 const styleConfig = {
                     '직접가해해충': { color: 'rgba(231, 76, 60, 0.75)', z: 3 },
                     '간접가해해충': { color: 'rgba(230, 126, 34, 0.75)', z: 2 },
@@ -371,11 +365,11 @@
                 <div class="panel-content-wrapper">
                     <div class="panel-photos">
                         <div class="photo-frame">
-                            <img src="photos/전체사진/${trapId}.jpg" onerror="this.onerror=null; this.parentElement.innerHTML='<div style=\'color:#95a5a6; font-size:11px;\'>📷 트랩 설치 전경</div>';">
+                            <div style="color:#95a5a6; font-size:11px;">📷 트랩 설치 전경</div>
                             <div class="photo-title">📷 트랩 설치 전경</div>
                         </div>
                         <div class="photo-frame">
-                            <img src="photos/세부사진/${trapId}.jpg" onerror="this.onerror=null; this.parentElement.innerHTML='<div style=\'color:#95a5a6; font-size:11px;\'>🔬 해충 실물 접사 사진</div>';">
+                            <div style="color:#95a5a6; font-size:11px;">🔬 해충 실물 접사 사진</div>
                             <div class="photo-title">🔬 해충 실물 접사 사진</div>
                         </div>
                     </div>
@@ -426,7 +420,6 @@
             detailPanel.innerHTML = html;
         }
 
-        // 줌 및 팬 제어 (마우스 + 모바일 터치 지원)
         function updateTransform() { layerContainer.style.transform = `translate(${pointX}px, ${pointY}px) scale(${scale})`; }
         resetBtn.addEventListener('click', (e) => { e.stopPropagation(); scale = 1; pointX = 0; pointY = 0; updateTransform(); });
 
@@ -440,7 +433,6 @@
             pointX = e.clientX - startX; pointY = e.clientY - startY; updateTransform();
         });
 
-        // 모바일 터치 드래그 지원
         mapViewport.addEventListener('touchstart', (e) => {
             if (e.touches.length === 1) {
                 isDragging = true;
