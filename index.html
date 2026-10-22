@@ -3,10 +3,80 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>박물관 IPM 모니터링 시스템 v8.4 (초고해상도 캡처 & 범례 분리형)</title>
+    <title>박물관 IPM 모니터링 시스템 v8.4 (보안 잠금 버전)</title>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <style>
+        /* 보안 비밀번호 게이트 스타일 */
+        #auth-overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            background-color: #1a252f;
+            z-index: 99999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .auth-card {
+            background-color: #ffffff;
+            padding: 35px 30px;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+            width: 340px;
+            text-align: center;
+            box-sizing: border-box;
+        }
+        .auth-card h3 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+            font-size: 20px;
+        }
+        .auth-card p {
+            margin: 0 0 20px 0;
+            color: #7f8c8d;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .auth-input {
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
+            border: 2px solid #bdc3c7;
+            border-radius: 6px;
+            box-sizing: border-box;
+            text-align: center;
+            letter-spacing: 3px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .auth-input:focus {
+            border-color: #1abc9c;
+        }
+        .auth-btn {
+            width: 100%;
+            margin-top: 15px;
+            padding: 12px;
+            background-color: #1abc9c;
+            color: #ffffff;
+            border: none;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .auth-btn:hover {
+            background-color: #16a085;
+        }
+        .auth-error {
+            color: #e74c3c;
+            font-size: 12px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        /* 대시보드 기본 스타일 */
         body {
             font-family: 'Malgun Gothic', sans-serif;
             margin: 0; padding: 0;
@@ -16,7 +86,6 @@
             color: #333;
             overflow: hidden;
         }
-        /* 왼쪽 사이드바 */
         .sidebar {
             width: 300px;
             background-color: #2c3e50;
@@ -84,7 +153,6 @@
         }
         .file-label.loaded { border: 1px solid #1abc9c; color: #1abc9c; font-weight: bold; }
         
-        /* 오른쪽 메인 레이아웃 */
         .main-layout {
             flex: 1;
             display: flex;
@@ -108,7 +176,6 @@
         }
         .btn-capture:hover { background-color: #3498db; }
 
-        /* 🌟 [캡처 메인 컨테이너] 500(도면) + 140(범례패널) = 총 가로 640px로 확장 */
         #capture-area {
             width: 640px;
             height: 500px;
@@ -121,8 +188,6 @@
             flex-shrink: 0;
             overflow: hidden;
         }
-
-        /* 순수 도면 줌/팬 뷰포트 영역 (정확히 500x500 분리 격리) */
         #map-viewport {
             width: 500px;
             height: 500px;
@@ -141,7 +206,6 @@
         }
         #bg-image { width: 100%; height: 100%; object-fit: fill; display: none; pointer-events: none; }
         
-        /* 🌟 [도면 우측 전용 범례 패널] 도면을 전혀 침범하지 않음 */
         .right-legend-panel {
             width: 140px;
             height: 100%;
@@ -175,27 +239,22 @@
             background-color: #ecf0f1; border: 1px solid #bdc3c7; padding: 7px;
             border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 11px;
             text-align: center; color: #2c3e50; transition: background 0.2s;
-            margin-top: auto; /* 하단 배치 */
+            margin-top: auto;
         }
         .btn-reset:hover { background-color: #d5dbdb; }
 
         .trap-station { position: absolute; width: 1px; height: 1px; transform: translate(-50%, -50%); }
-        
-        /* 벡터 스팟 스타일 */
         .pest-circle {
             position: absolute; border: 1px solid rgba(255, 255, 255, 0.95); border-radius: 50%;
             transform: translate(-50%, -50%); mix-blend-mode: multiply; cursor: pointer;
             box-shadow: 0 0 3px rgba(0,0,0,0.2); transition: transform 0.15s; vector-effect: non-scaling-stroke;
         }
-        
-        /* 툴팁 */
         .tooltip {
             visibility: hidden; position: absolute; background-color: rgba(32, 44, 57, 0.96);
             color: white; padding: 10px; border-radius: 6px; font-size: 11px; z-index: 1000;
             pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); line-height: 1.5;
         }
 
-        /* 하단 상세 패널 */
         .detail-panel {
             max-width: 1050px;
             background-color: white;
@@ -248,6 +307,18 @@
 </head>
 <body>
 
+    <!-- 보안 비밀번호 인증 팝업 -->
+    <div id="auth-overlay">
+        <div class="auth-card">
+            <h3>🔒 비공개 접근 인증</h3>
+            <p>본 시스템은 인가된 담당자 전용입니다.<br>발급받으신 접속 비밀번호를 입력해 주세요.</p>
+            <input type="password" id="access-password-input" class="auth-input" placeholder="비밀번호 입력">
+            <button id="auth-submit-btn" class="auth-btn">접속 승인</button>
+            <div id="auth-error-msg" class="auth-error">비밀번호가 올바르지 않습니다.</div>
+        </div>
+    </div>
+
+    <!-- 대시보드 메인 레이아웃 -->
     <div class="sidebar">
         <h3>📂 IPM 프로젝트 목록</h3>
         <ul class="project-list" id="project-list"></ul>
@@ -278,18 +349,15 @@
             <button class="btn-capture" id="download-btn">📸 고해상도 도면 캡처 (보고서용)</button>
         </div>
 
-        <!-- 🌟 전체 캡처 대상 컨테이너 (도면 500px + 범례 140px = 총 640px) -->
         <div id="capture-area">
             <div id="no-data" style="position:absolute; top:50%; left:250px; transform:translate(-50%,-50%); color:#7f8c8d; font-weight:bold; text-align:center; z-index:10;">프로젝트를 로드해 주세요.</div>
             
-            <!-- 순수 도면 줌/팬 전용 500x500 뷰포트 -->
             <div id="map-viewport">
                 <div id="layer-container">
                     <img id="bg-image" alt="도면 배경">
                 </div>
             </div>
 
-            <!-- 우측 범례 패널 (도면과 완전 분리되어 도면을 가리지 않음) -->
             <div class="right-legend-panel" id="ui-overlay" style="display: none;">
                 <div class="legend-title">범 례 (Legend)</div>
                 <div class="legend-box">
@@ -301,7 +369,6 @@
             </div>
         </div>
 
-        <!-- 하단 상세 패널 -->
         <div class="detail-panel" id="detail-panel">
             <div class="panel-placeholder" id="panel-placeholder">
                 📍 도면 위의 해충 원(스팟) 데이터를 클릭하시면<br>여기에 해당 트랩의 전경 사진, 포획 해충 세부 접사 및 보존과학 방제 가이드가 연동됩니다.
@@ -312,6 +379,38 @@
     <div id="tooltip" class="tooltip"></div>
 
     <script>
+        // ==========================================
+        // 🔒 보안 인증 제어 로직 (비밀번호 변경 가능)
+        // ==========================================
+        const ACCESS_PASSWORD = "0558"; // 지정할 접속 비밀번호
+        const authOverlay = document.getElementById('auth-overlay');
+        const passInput = document.getElementById('access-password-input');
+        const submitBtn = document.getElementById('auth-submit-btn');
+        const errorMsg = document.getElementById('auth-error-msg');
+
+        if (sessionStorage.getItem('ipm_auth_passed') === 'true') {
+            authOverlay.style.display = 'none';
+        }
+
+        function checkAuth() {
+            if (passInput.value === ACCESS_PASSWORD) {
+                sessionStorage.setItem('ipm_auth_passed', 'true');
+                authOverlay.style.display = 'none';
+            } else {
+                errorMsg.style.display = 'block';
+                passInput.value = '';
+                passInput.focus();
+            }
+        }
+
+        submitBtn.addEventListener('click', checkAuth);
+        passInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') checkAuth();
+        });
+
+        // ==========================================
+        // 대시보드 코어 로직
+        // ==========================================
         const projectListEl = document.getElementById('project-list');
         const imgUploader = document.getElementById('img-uploader');
         const dataUploader = document.getElementById('data-uploader');
@@ -482,7 +581,7 @@
             });
 
             tx.oncomplete = function() {
-                alert(`[${name}] 프로젝트 대시보드가 성공적으로 마스터 DB에 빌드되었습니다!`);
+                alert(`[${name}] 프로젝트 대시보드가 마스터 DB에 성공적으로 빌드되었습니다!`);
                 document.getElementById('new-proj-name').value = '';
                 lblImg.textContent = "🖼️ 1. 도면 이미지 선택"; lblImg.classList.remove('loaded');
                 lblData.textContent = "📊 2. 모니터링 데이터 (앱시트)"; lblData.classList.remove('loaded');
@@ -732,7 +831,6 @@
             }
         }
 
-        // 줌 및 드래그 제어 (mapViewport 영역에서만 반응)
         mapViewport.addEventListener('mousedown', (e) => {
             e.preventDefault(); isDragging = true;
             startX = e.clientX - pointX; startY = e.clientY - pointY;
@@ -763,14 +861,11 @@
             }
         }
 
-        // 🌟 [핵심 변경: 초고해상도 300DPI급 리포트 캡처 엔진]
         downloadBtn.addEventListener('click', function() {
             downloadBtn.textContent = "⏳ 초고해상도 렌더링 중...";
-            
-            // scale: 3 설정으로 원본의 3배(약 1920x1500px, 300DPI급 인쇄 화질)로 생성
             html2canvas(captureArea, {
                 useCORS: true,
-                scale: 3, // 초고화질 배율
+                scale: 3,
                 backgroundColor: "#ffffff",
                 logging: false
             }).then(canvas => {
