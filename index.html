@@ -201,12 +201,11 @@
         let startX = 0; let startY = 0; let isDragging = false;
         let globalProjectData = null;
 
-        // 🌟 저장소에 실제로 올라간 한글 파일명을 그대로 가리키도록 연결
         async function initAutoLoad() {
             try {
                 currentViewTitle.textContent = "⏳ 모니터링 데이터 분석 중...";
                 
-                // 1. 도면 이미지 로드 (URL 인코딩 적용)
+                // 1. 도면 이미지 로드
                 const mapFileName = encodeURIComponent('ㅇㅇ박물관 지하1층 기본도면.jpg');
                 bgImage.src = mapFileName;
                 bgImage.onload = () => {
@@ -215,7 +214,7 @@
                     uiOverlay.style.display = 'flex';
                 };
 
-                // 2. 도감 엑셀 로드 (파일이 없을 경우에도 건너뛰도록 처리)
+                // 2. 도감 엑셀 로드
                 let dictMap = {};
                 try {
                     const dictRes = await fetch(encodeURIComponent('직접가해해충_도감.xlsx'));
@@ -236,7 +235,7 @@
                     console.warn("도감 파일 누락 - 기본 텍스트 모드로 작동합니다.");
                 }
 
-                // 3. 모니터링 엑셀 다운로드 및 분석
+                // 3. 모니터링 엑셀 로드
                 const dataFileName = encodeURIComponent('2026 ㅇㅇ박물관 1차 모니터링.xlsx');
                 const dataRes = await fetch(dataFileName);
                 if (!dataRes.ok) throw new Error("모니터링 엑셀 파일을 읽을 수 없습니다.");
@@ -301,7 +300,7 @@
 
             } catch (err) {
                 console.error(err);
-                alert("데이터 로드 중 오류가 발생했습니다. 브라우저 개발자 도구(F12) 콘솔을 확인해 주세요.");
+                alert("데이터 로드 중 오류가 발생했습니다.");
             }
         }
 
@@ -359,17 +358,30 @@
             return dateVal;
         }
 
+        // C20번 전용 샘플 사진이 연동되는 함수
         function buildDetailPanel(trapId, group, dict) {
+            let fullPhotoHtml = "";
+            let detailPhotoHtml = "";
+
+            // C20번을 클릭했을 때만 준비된 사진 2장을 표시
+            if (String(trapId).trim().toUpperCase() === 'C20') {
+                fullPhotoHtml = `<img src="C20_full.jpg" alt="C20 전경" onerror="this.parentElement.innerHTML='<div style=\'color:#95a5a6; font-size:11px;\'>📷 트랩 설치 전경</div>';">`;
+                detailPhotoHtml = `<img src="C20_detail.jpg" alt="C20 해충접사" onerror="this.parentElement.innerHTML='<div style=\'color:#95a5a6; font-size:11px;\'>🔬 해충 실물 접사 사진</div>';">`;
+            } else {
+                fullPhotoHtml = `<div style="color:#95a5a6; font-size:11px;">📷 트랩 설치 전경 (준비중)</div>`;
+                detailPhotoHtml = `<div style="color:#95a5a6; font-size:11px;">🔬 해충 실물 접사 사진 (준비중)</div>`;
+            }
+
             let html = `
                 <h4 class="panel-header-title">🔍 [${trapId}번 트랩] 실시간 분석 모니터링 리포트</h4>
                 <div class="panel-content-wrapper">
                     <div class="panel-photos">
                         <div class="photo-frame">
-                            <div style="color:#95a5a6; font-size:11px;">📷 트랩 설치 전경</div>
+                            ${fullPhotoHtml}
                             <div class="photo-title">📷 트랩 설치 전경</div>
                         </div>
                         <div class="photo-frame">
-                            <div style="color:#95a5a6; font-size:11px;">🔬 해충 실물 접사 사진</div>
+                            ${detailPhotoHtml}
                             <div class="photo-title">🔬 해충 실물 접사 사진</div>
                         </div>
                     </div>
